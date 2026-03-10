@@ -1,0 +1,256 @@
+# OpenClaw Agent Backup Script (Universal Version)
+# 
+# Usage:
+#   .\backup.ps1                    # Use default paths
+#   .\backup.ps1 -Help              # Show help
+#
+# You can edit the CONFIG section below to customize paths,
+# or pass parameters when running the script.
+
+param(
+    [switch]$Help,
+    [string]$WorkspaceDir,
+    [string]$OpenClawDir,
+    [string]$BackupDir
+)
+
+# ==================== CONFIG ====================
+# Edit these paths to match your environment
+# Or pass them as parameters
+
+$DEFAULT_WORKSPACE_DIR = "D:\WorkSpace"
+$DEFAULT_OPENCLAW_DIR = if ($IsWindows -or $env:OS -match "Windows") {
+    "$env:USERPROFILE\.openclaw"
+} else {
+    "$env:HOME\.openclaw"
+}
+$DEFAULT_BACKUP_DIR = "D:\WorkSpace\backup"
+
+# ==================== SETUP ====================
+
+$WorkspaceDir = if ($WorkspaceDir) { $WorkspaceDir } else { $DEFAULT_WORKSPACE_DIR }
+$OpenClawDir = if ($OpenClawDir) { $OpenClawDir } else { $DEFAULT_OPENCLAW_DIR }
+$BackupDir = if ($BackupDir) { $BackupDir } else { $DEFAULT_BACKUP_DIR }
+
+if ($Help) {
+    Write-Host @"
+OpenClaw Agent Backup Script
+============================
+
+Usage:
+  .\backup.ps1 [options]
+
+Options:
+  -Help           Show this help message
+  -WorkspaceDir   Custom workspace directory (default: $DEFAULT_WORKSPACE_DIR)
+  -OpenClawDir    Custom OpenClaw config directory (default: ~/.openclaw)
+  -BackupDir      Custom backup output directory (default: $DEFAULT_BACKUP_DIR)
+
+Examples:
+  .\backup.ps1
+  .\backup.ps1 -WorkspaceDir "E:\MyWorkspace"
+  .\backup.ps1 -BackupDir "E:\Backups\OpenClaw"
+
+Default backup structure:
+  <BackupDir>\
+    <timestamp>\
+      README.md
+      workspace\
+        SOUL.md, IDENTITY.md, USER.md, MEMORY.md, TOOLS.md, AGENTS.md, HEARTBEAT.md
+        memory\
+      openclaw-config\
+        openclaw.json, .env
+        skills\
+        sessions\
+        plugins\
+
+"@
+    exit 0
+}
+
+# ==================== MAIN ====================
+
+$ErrorActionPreference = "Stop"
+$timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm"
+$backupPath = "$BackupDir\$timestamp"
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  OpenClaw Agent Backup" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Source:" -ForegroundColor Yellow
+Write-Host "  Workspace:   $WorkspaceDir"
+Write-Host "  OpenClaw:    $OpenClawDir"
+Write-Host ""
+Write-Host "Target:" -ForegroundColor Yellow
+Write-Host "  Backup:      $backupPath"
+Write-Host ""
+
+# Validate source directories
+if (-not (Test-Path $WorkspaceDir)) {
+    Write-Host "ERROR: Workspace directory not found: $WorkspaceDir" -ForegroundColor Red
+    exit 1
+}
+if (-not (Test-Path $OpenClawDir)) {
+    Write-Host "ERROR: OpenClaw directory not found: $OpenClawDir" -ForegroundColor Red
+    exit 1
+}
+
+# Create backup directories
+Write-Host "Creating backup directories..." -ForegroundColor Green
+New-Item -ItemType Directory -Force -Path "$backupPath\workspace" | Out-Null
+New-Item -ItemType Directory -Force -Path "$backupPath\openclaw-config" | Out-Null
+
+# ==================== WORKSPACE FILES ====================
+
+Write-Host ""
+Write-Host "Backing up workspace files..." -ForegroundColor Green
+
+$workspaceFiles = @(
+    "SOUL.md",
+    "IDENTITY.md", 
+    "USER.md",
+    "MEMORY.md",
+    "TOOLS.md",
+    "AGENTS.md",
+    "HEARTBEAT.md",
+    "BOOTSTRAP.md"
+)
+
+$copiedFiles = 0
+foreach ($file in $workspaceFiles) {
+    $sourcePath = "$WorkspaceDir\$file"
+    if (Test-Path $sourcePath) {
+        Copy-Item $sourcePath "$backupPath\workspace\" -Force
+        Write-Host "  [OK] $file"
+        $copiedFiles++
+    }
+}
+
+# Copy memory directory
+if (Test-Path "$WorkspaceDir\memory") {
+    Copy-Item "$WorkspaceDir\memory" "$backupPath\workspace\memory" -Recurse -Force
+    $memoryCount = (Get-ChildItem "$backupPath\workspace\memory" -File -Recurse).Count
+    Write-Host "  [OK] memory/ ($memoryCount files)"
+}
+
+# ==================== OPENCLAW CONFIG ====================
+
+Write-Host ""
+Write-Host "Backing up OpenClaw config..." -ForegroundColor Green
+
+# Config files
+$configFiles = @("openclaw.json", ".env")
+foreach ($file in $configFiles) {
+    $sourcePath = "$OpenClawDir\$file"
+    if (Test-Path $sourcePath) {
+        Copy-Item $sourcePath "$backupPath\openclaw-config\" -Force
+        Write-Host "  [OK] $file"
+    }
+}
+
+# Directories to backup
+$configDirs = @("skills", "sessions", "plugins")
+foreach ($dir in $configDirs) {
+    $sourcePath = "$OpenClawDir\$dir"
+    if (Test-Path $sourcePath) {
+        Copy-Item $sourcePath "$backupPath\openclaw-config\$dir" -Recurse -Force
+        $count = (Get-ChildItem "$backupPath\openclaw-config\$dir" -File -Recurse).Count
+        Write-Host "  [OK] $dir/ ($count files)"
+    }
+}
+
+# ==================== README ====================
+
+$backupTime = Get-Date -Format "yyyy-MM-dd HH:mm"
+$computerName = $env:COMPUTERNAME
+$scriptPath = $PSCommandPath
+
+$readmeContent = @"
+# OpenClaw Agent Backup
+
+**Backup Time:** $backupTime (Asia/Shanghai)
+**Source Machine:** $computerName
+
+---
+
+## Paths
+
+| Item | Original Path |
+|------|---------------|
+| Workspace | $WorkspaceDir |
+| OpenClaw Config | $OpenClawDir |
+
+---
+
+## File List
+
+| Backup Path | Description | Restore To |
+|-------------|-------------|------------|
+| workspace/SOUL.md | Agent personality | <WorkspaceDir>\ |
+| workspace/IDENTITY.md | Agent identity | <WorkspaceDir>\ |
+| workspace/USER.md | User info | <WorkspaceDir>\ |
+| workspace/MEMORY.md | Long-term memory | <WorkspaceDir>\ |
+| workspace/TOOLS.md | Local tools config | <WorkspaceDir>\ |
+| workspace/AGENTS.md | Agent behavior rules | <WorkspaceDir>\ |
+| workspace/HEARTBEAT.md | Heartbeat tasks | <WorkspaceDir>\ |
+| workspace/memory/ | Daily memory | <WorkspaceDir>\memory\ |
+| openclaw-config/openclaw.json | OpenClaw main config | <OpenClawDir>\ |
+| openclaw-config/.env | API Keys | <OpenClawDir>\ |
+| openclaw-config/skills/ | Installed Skills | <OpenClawDir>\skills\ |
+| openclaw-config/plugins/ | Plugins | <OpenClawDir>\plugins\ |
+| openclaw-config/sessions/ | Session data | <OpenClawDir>\sessions\ |
+
+---
+
+## Restore Steps
+
+### 1. Install OpenClaw
+Follow official documentation.
+
+### 2. Restore Workspace
+```
+xcopy <backup>\workspace <WorkspaceDir> /E /I
+```
+
+### 3. Restore OpenClaw Config
+```
+xcopy <backup>\openclaw-config <OpenClawDir> /E /I
+```
+
+### 4. Login ClawHub
+```
+clawhub login --token <your-token>
+```
+
+### 5. Restart OpenClaw
+```
+openclaw gateway restart
+```
+
+---
+
+## Notes
+
+- This backup contains API Keys. Keep it secure.
+- Do not upload to public repositories.
+- Adjust paths based on your new machine's username.
+"@
+
+$readmeContent | Out-File -FilePath "$backupPath\README.md" -Encoding UTF8
+
+# ==================== SUMMARY ====================
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  Backup Complete!" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "Location: $backupPath" -ForegroundColor Cyan
+Write-Host ""
+
+# Calculate backup size
+$backupSize = (Get-ChildItem $backupPath -Recurse | Measure-Object -Property Length -Sum).Sum
+$backupSizeMB = [math]::Round($backupSize / 1MB, 2)
+Write-Host "Size: $backupSizeMB MB"
+Write-Host ""
